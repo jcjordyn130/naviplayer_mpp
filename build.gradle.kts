@@ -1,19 +1,18 @@
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-
-plugins {
-    kotlin("jvm")
-    id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose")
-}
-
-group = "org.jordynsblog"
-version = "1.0-SNAPSHOT"
-
 repositories {
     mavenCentral()
     maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
     google()
 }
+
+plugins {
+    kotlin("jvm")
+    id("org.jetbrains.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
+    kotlin("plugin.serialization") version "2.1.0"
+}
+
+group = "org.jordynsblog"
+version = "1.0-SNAPSHOT"
 
 dependencies {
     // Note, if you develop a library, you should use compose.desktop.common.
@@ -25,16 +24,13 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:3.1.0")
     implementation("com.github.kittinunf.result:result:5.6.0")
     implementation("io.github.aakira:napier:2.7.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+    implementation(platform("org.kotlincrypto.hash:bom:0.7.0"))
+    implementation("org.kotlincrypto.hash:md")
 }
 
 compose.desktop {
     application {
         mainClass = "MainKt"
-
-        nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "naviplayer_desktop"
-            packageVersion = "1.0.0"
-        }
     }
 }
