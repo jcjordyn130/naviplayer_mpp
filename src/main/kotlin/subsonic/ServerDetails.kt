@@ -7,4 +7,6 @@ data class ServerDetails(
     val authMethod: AuthMethod,
     val username: String? = null,
     val password: String? = null,
-    val apikey: String? = null)
+    val apikey: String? = null,
+    val loggingRedacted: Boolean = true // Redact ServerDetails from log
+)

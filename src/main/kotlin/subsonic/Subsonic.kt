@@ -13,6 +13,7 @@ import io.ktor.util.*
 import kotlinx.serialization.json.Json
 import org.kotlincrypto.hash.md.MD5
 import root
+import subsonic.caches.AbstractCache
 import java.security.cert.Extension
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -21,21 +22,34 @@ import kotlin.uuid.Uuid
 const val SUBSONIC_CLIENT = "SubsonicLibrary For Kotlin"
 const val SUBSONIC_VERSION = "0.0.1"
 
+// Unauthenticated endpoints, as of right now this is just getOpenSubsonicExtensions
+private val UNPROTECTED_ENDPOINTS = arrayOf("getOpenSubsonicExtensions")
+
 class Subsonic(var serverDetails: ServerDetails,
+               val cacheImpl: AbstractCache,
                private val clientIden: String = SUBSONIC_CLIENT,
                private val versionIden: String = SUBSONIC_VERSION) {
     private var client: HttpClient
 
     init {
+        System.setProperty("kotlinx.coroutines.debug", "on")
         Napier.base(DebugAntilog())
         Napier.i("Subsonic class initialized using $serverDetails")
+
         // Check for insecure authentication
-        // We log a TON, so the auth details get logged as well
-        if (serverDetails.authMethod != AuthMethod.TOKEN) {
-            Napier.w("Not using token authentication... this is NOT recommended and is insecure, especially on non-HTTPS servers!")
+        // We no longer log authentication details by default, however, intermediate servers can.
+        when (serverDetails.authMethod) {
+            AuthMethod.APIKEY, AuthMethod.TOKEN -> {
+                Napier.w("Not using token or apikey authentication... this is NOT recommended and is insecure, especially on non-HTTPS servers!")
+            }
+
+            // Exhaustive branches are required for when's
+            else -> {}
         }
 
         client = HttpClient(CIO) {
+            // Add client identity and response format
+            // These are in defaultRequest as they never change
             defaultRequest {
                 url.takeFrom(serverDetails.url).apply {
                     parameters.append("v", versionIden)
@@ -43,21 +57,40 @@ class Subsonic(var serverDetails: ServerDetails,
                     parameters.append("f", "json") // Return JSON instead of XML
                 }
             }
+
+            //HttpResponseValidator {
+            //}
         }
 
-        // Intercept requests to log URL
-        // Can potentially handle auth here to allow for username/password changes
-        // without recreating the class.
+        // Intercept all requests to log the URL and to add authentication details
+        // to protected endpoints
         client.plugin(HttpSend).intercept { request ->
-            // This is in intercept instead of defaultRequest as it is dynamically generated
-            // depending on username, password, and authMethod and I want it to be able to be changed
-            // without having to destroy the class.
-            // Additionally, some endpoints such as getOpenSubsonicExtensions do NOT require auth
-            if (!request.url.pathSegments.contains("getOpenSubsonicExtensions")) {
+            // This returns true only if the predicate does NOT equal true
+            // so pathSegment NOT in UNPROTECTED_ENDPOINTS
+            val protected = UNPROTECTED_ENDPOINTS.none { request.url.pathSegments.contains(it) }
+            if (protected) {
                 request.url.parameters.appendAll(generateAuthDetails(serverDetails))
             }
 
-            Napier.d("Using URL: ${request.url.buildString()}")
+            // Redact logging if requested
+            val loggingUrl = if (serverDetails.loggingRedacted) {
+                // takeFrom required as just setting redactedUrl = request.url
+                // results in a reference and NOT a copy
+                val redactedUrl = URLBuilder().takeFrom(request.url)
+
+                // Remove username, password, salt, token, and apikey for secure logging
+                arrayOf("u", "p", "s", "t", "apikey").forEach {
+                    if (redactedUrl.parameters.contains(it)) {
+                        Napier.d("Removing URL parameter $it for logging redaction!")
+                        //redactedUrl.parameters[it] = "[redacted]"
+                    }
+                }
+                redactedUrl
+            } else {
+                request.url
+            }
+
+            Napier.d("Using URL: ${loggingUrl.buildString()}")
             execute(request)
         }
     }
@@ -122,13 +155,23 @@ class Subsonic(var serverDetails: ServerDetails,
     }
 
     suspend fun getOpenSubsonicExtensions(): HashMap<String, MutableList<Int>> {
-        val response: HttpResponse = client.get("/rest/getOpenSubsonicExtensions").apply {
-            // Early fail to save on resources
-            if (this.status != HttpStatusCode.OK) {
-                Napier.i("Returning no openSubsonic extensions due to status code ${this.status.value}")
+        val cacheEntry = cacheImpl.getResponse("getOpenSubsonicExtensions")
+        val decodedResp = if (cacheEntry != null) {
+            Napier.d("Found cache entry")
+            cacheEntry
+        } else {
+            val response: HttpResponse = client.get("/rest/getOpenSubsonicExtensions").apply {
+                // Early fail to save on resources
+                if (this.status != HttpStatusCode.OK) {
+                    Napier.i("Returning no openSubsonic extensions due to status code ${this.status.value}")
+                    return HashMap()
+                }
             }
+            val decodedResp = Json.decodeFromString<root>(response.bodyAsText())
+            cacheImpl.addResponse("getOpenSubsonicExtensions", response = decodedResp)
+
+            decodedResp
         }
-        val decodedResp = Json.decodeFromString<root>(response.bodyAsText())
 
         // Convert extensions to return type
         val extensions: HashMap<String, MutableList<Int>> = HashMap()

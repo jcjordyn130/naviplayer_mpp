@@ -27,6 +27,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
     implementation(platform("org.kotlincrypto.hash:bom:0.7.0"))
     implementation("org.kotlincrypto.hash:md")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
 }
 
 compose.desktop {
